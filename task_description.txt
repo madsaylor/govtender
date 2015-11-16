@@ -1,0 +1,28 @@
+We wish to create a script for ubuntu server which will pull a rss feed, authenticate to the webserver with Wget, find the download link & save the data to a specific folder.
+
+Main Features:
+•	Will be started and stopped as a service.
+•	The script will be written in BASH & PHP
+•	Paquet dependency (only opensource)
+•	Organize the downloads in folder hierarchy and titles according to the RSS feed
+•	Create .txt file with the extract of the RSS feed inside the folder
+•	Extract the file if compressed (and sub .zip file) and Make cleanup
+•	Search for .pdf & OCR the files after unzip
+•	Creates logs
+•	Send email notification in case of error
+
+Script process:
+1)	Pull RSS news from a specific website
+2)	Authenticate as a user on that website (with Wget)
+3)	Between one and three link will be on the target page
+a.	Direct link
+b.	Javascript link
+c.	Link to php form, then Javascript link
+4)	Create a folder “folder name is the RSS title”
+5)	Create a .txt document insider the folder with RSS title & content
+6)	Download all files from links
+7)	Extract all files
+8)	Search for .pdf file
+9)	Make pdf OCR if needed
+10)	Create a log of activity
+
