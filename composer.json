@@ -2,7 +2,8 @@
     "name": "madsaylor/govtender",
     "description": "French Government Tender Feed Tender",
     "require": {
-        "guzzlehttp/guzzle": "^6.1"
+        "guzzlehttp/guzzle": "^6.1",
+        "monolog/monolog": "^1.17"
     },
     "authors": [
         {
