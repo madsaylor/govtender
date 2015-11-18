@@ -6,6 +6,7 @@
         "monolog/monolog": "^1.17",
         "jwage/purl": "^0.0.6"
     },
+    "bin": ["rssScrap.php"],
     "authors": [
         {
             "name": "Sergey Grigorchuk",
