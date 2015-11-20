@@ -31,6 +31,19 @@ function getFormFields($xpath, $formId){
     return $formFields;
 }
 
+function extractZip($filename, $destination){
+    $zip = new ZipArchive;
+    if ($zip->open($filename) === TRUE) {
+        $zip->extractTo($destination);
+        $zip->close();
+        $filesNumber = count(scandir($destination));
+        unlink($filename);
+        return "{$filesNumber} extracted";
+    } else {
+        return "Archive is not valid";
+    }
+}
+
 // create a log channel
 $logger = new Logger('scrape-process');
 //$logger->pushHandler(new StreamHandler(__DIR__.'/scrape.log', Logger::INFO));
@@ -74,27 +87,68 @@ $formFields['ctl0$CONTENU_PAGE$authentificationButton_y'] = 0;
 
 $response = $client->request('POST', $loginUrl, ['form_params' => $formFields]);
 $tenderRootDir = __DIR__.'/tenders';
-mkdir($tenderRootDir);
+if(!file_exists($tenderRootDir)){
+    mkdir($tenderRootDir);
+}
 
 foreach($tenderList as $tender){
+    $tenderDir = $tenderRootDir . "/{$tender->guid}";
+    if (file_exists($tenderDir)){
+        $logger->addInfo("Skipping tender {$tender->guid}, corresponding folder exists");
+        continue;
+    }
+
     $detailsUrl = new Url($tender->link);
-    $detailsUrl->query->set('page', 'entreprise.EntrepriseDetailConsultation');
-    $xpath = getXpathFromUrl($client, $detailsUrl);
+    $detailsUrl->query->set('page', 'entreprise.EntrepriseDetailsConsultation');
+    $detailsUrl->query->remove('AllCons');
+
+    $detailsXpath = getXpathFromUrl($client, $detailsUrl);
     $xpathQuery = '//li[not(contains(@style,"display:none"))]//a[contains(@id,"ctl0_CONTENU_PAGE_linkDownload")]';
-    $result = $xpath->query($xpathQuery);
+    $result = $detailsXpath->query($xpathQuery);
     $logger->addInfo("Tender url {$tender->link}");
 
+    $tenderDir = $tenderRootDir."/{$tender->guid}";
+    mkdir($tenderDir);
     if ($result->length > 0) {
-        $tenderDir = $tenderRootDir . "/{$tender->guid}";
-        mkdir($tenderDir);
         $logger->addInfo("{$result->length} files found on tender {$tender->guid}");
         foreach ($result as $aElement) {
             $url = new Url($aElement->getAttribute('href'));
-            $baseUrl = clone $detailsUrl;
-            $baseUrl->query->setData([]);
-            $url->join($baseUrl);
-            $logger->addInfo("{$url->query->get('page')}");
-            if ($url->query->get('page') == 'entreprise.EntrepriseDownloadReglement') {
+            if (strpos($aElement->getAttribute('href'), 'javascript:') !== false) {
+                $formFields = getFormFields($detailsXpath, 'ctl0_ctl1');
+                $formFields['PRADO_POSTBACK_TARGET'] = 'ctl0$CONTENU_PAGE$linkDownloadComplement';
+                $formFields['ongletActive'] = '1';
+
+                foreach($formFields as $key => $value){
+                    if(!in_array($key,['PRADO_PAGESTATE', 'PRADO_POSTBACK_TARGET'])){
+                        unset($formFields[$key]);
+                    }
+                }
+
+                $response = $client->request('POST', $detailsUrl, ['form_params' => $formFields]);
+
+                $filename = 'details.file';
+                $header = utf8_encode(urldecode($response->getHeaderLine('Content-Disposition')));
+                $result = preg_match('/filename="(.*)"/u', $header, $matches);
+                if ($result > 0) {
+                    $filename = $matches[1];
+                }
+
+                $tenderMoreInfoDir = $tenderDir . "/tender_more_info";
+                mkdir($tenderMoreInfoDir);
+
+                $response = $client->request('POST', $detailsUrl, [
+                    'form_params' => $formFields,
+                    'sink' => "$tenderMoreInfoDir/{$filename}"
+                ]);
+
+                $logger->addInfo("{$filename} downloaded");
+            }
+            elseif ($url->query->get('page') == 'entreprise.EntrepriseDownloadReglement') {
+                $baseUrl = clone $detailsUrl;
+                $baseUrl->query->setData([]);
+                $url->join($baseUrl);
+                $logger->addInfo("{$url->query->get('page')}");
+
                 $tenderRulesDir = $tenderDir . "/tender_rules";
                 mkdir($tenderRulesDir);
 
@@ -106,12 +160,23 @@ foreach($tenderList as $tender){
                 if ($result > 0) {
                     $filename = $matches[1];
                 }
-                $response = $client->request('GET', $url, ['sink' => $tenderRulesDir . "/{$filename}"]);
+                $tenderRulesAbsolutePath = $tenderRulesDir . "/{$filename}";
+                $response = $client->request('GET', $url, ['sink' => $tenderRulesAbsolutePath]);
+                $pathInfo = pathinfo($tenderRulesAbsolutePath);
+                if ($pathInfo['extension'] == 'zip'){
+                    $message = extractZip($tenderRulesAbsolutePath, "{$tenderRulesDir}/");
+                    $logger->addInfo($message);
+                }
+
                 if ($response->getStatusCode() == 200) {
                     $logger->addInfo("{$filename} downloaded");
                 }
             }
             elseif ($url->query->get('page') == 'entreprise.EntrepriseDemandeTelechargementDce') {
+                $baseUrl = clone $detailsUrl;
+                $baseUrl->query->setData([]);
+                $url->join($baseUrl);
+                $logger->addInfo("{$url->query->get('page')}");
                 $tenderDocsDir = $tenderDir . "/tender_documents";
                 mkdir($tenderDocsDir);
                 $xpath = getXpathFromUrl($client, $url);
@@ -124,10 +189,14 @@ foreach($tenderList as $tender){
                 $xpath = getXpathFromHtmlBody($response->getBody());
                 $formFields = getFormFields($xpath, 'ctl0_ctl1');
                 $formFields['PRADO_POSTBACK_TARGET'] = 'ctl0$CONTENU_PAGE$EntrepriseDownloadDce$completeDownload';
+                $archiveName = "{$tenderDocsDir}/docs.zip";
                 $response = $client->request('POST', $url, [
                     'form_params' => $formFields,
-                    'sink' => "{$tenderDocsDir}/docs.zip"
+                    'sink' => $archiveName
                 ]);
+
+                $message = extractZip($archiveName, "{$tenderDocsDir}/", $logger);
+                $logger->addInfo($message);
             }
         }
     } else {
