@@ -31,25 +31,51 @@ function getFormFields($xpath, $formId){
     return $formFields;
 }
 
-function extractZip($filename, $destination){
+function extractZip($filename, $destination, $logger){
     $zip = new ZipArchive;
     if ($zip->open($filename) === TRUE) {
         $zip->extractTo($destination);
         $zip->close();
         $filesNumber = count(scandir($destination));
         unlink($filename);
-        return "{$filesNumber} extracted";
-    } else {
+
+        $directory = new \RecursiveDirectoryIterator($destination, \FilesystemIterator::FOLLOW_SYMLINKS);
+        $filter = new \RecursiveCallbackFilterIterator($directory, function ($current, $key, $iterator) {
+            if ($iterator->hasChildren()){
+                return true;
+            }
+            return strtolower($current->getExtension()) == 'zip';
+        });
+
+        $iterator = new \RecursiveIteratorIterator($filter);
+        foreach ($iterator as $fileObject) {
+            extractZip($fileObject->getPathname(), $fileObject->getPath(), $logger);
+        }
+
+        $logger->addInfo("{$filesNumber} files from {$filename} extracted");
+        return "Recurcive zip extraction complete";
+    }
+    else {
         return "Archive is not valid";
     }
 }
 
+//for running within Phar file
+if(!empty(Phar::running(false))){
+    $pathArr = explode('/', Phar::running(false));
+    array_pop($pathArr);
+    $currentDir = implode('/', $pathArr);
+}
+else {
+    $currentDir = __DIR__;
+}
+
 // create a log channel
 $logger = new Logger('scrape-process');
-//$logger->pushHandler(new StreamHandler(__DIR__.'/scrape.log', Logger::INFO));
+//$logger->pushHandler(new StreamHandler($currentDir.'/scrape.log', Logger::INFO));
 $logger->pushHandler(new \Monolog\Handler\ErrorLogHandler());
 
-$feedFilename = __DIR__.'/tenderfeed.xml';
+$feedFilename = $currentDir.'/tenderfeed.xml';
 
 $client = new Client();
 
@@ -86,14 +112,14 @@ $formFields['ctl0$CONTENU_PAGE$authentificationButton_x'] = 14;
 $formFields['ctl0$CONTENU_PAGE$authentificationButton_y'] = 0;
 
 $response = $client->request('POST', $loginUrl, ['form_params' => $formFields]);
-$tenderRootDir = __DIR__.'/tenders';
+$tenderRootDir = $currentDir.'/tenders';
 if(!file_exists($tenderRootDir)){
     mkdir($tenderRootDir);
 }
 
 foreach($tenderList as $tender){
     $tenderDir = $tenderRootDir . "/{$tender->guid}";
-    if (file_exists($tenderDir)){
+    if (file_exists($tenderDir)) {
         $logger->addInfo("Skipping tender {$tender->guid}, corresponding folder exists");
         continue;
     }
@@ -107,7 +133,7 @@ foreach($tenderList as $tender){
     $result = $detailsXpath->query($xpathQuery);
     $logger->addInfo("Tender url {$tender->link}");
 
-    $tenderDir = $tenderRootDir."/{$tender->guid}";
+    $tenderDir = $tenderRootDir . "/{$tender->guid}";
     mkdir($tenderDir);
     if ($result->length > 0) {
         $logger->addInfo("{$result->length} files found on tender {$tender->guid}");
@@ -118,8 +144,8 @@ foreach($tenderList as $tender){
                 $formFields['PRADO_POSTBACK_TARGET'] = 'ctl0$CONTENU_PAGE$linkDownloadComplement';
                 $formFields['ongletActive'] = '1';
 
-                foreach($formFields as $key => $value){
-                    if(!in_array($key,['PRADO_PAGESTATE', 'PRADO_POSTBACK_TARGET'])){
+                foreach ($formFields as $key => $value) {
+                    if (!in_array($key, ['PRADO_PAGESTATE', 'PRADO_POSTBACK_TARGET'])) {
                         unset($formFields[$key]);
                     }
                 }
@@ -136,18 +162,23 @@ foreach($tenderList as $tender){
                 $tenderMoreInfoDir = $tenderDir . "/tender_more_info";
                 mkdir($tenderMoreInfoDir);
 
+                $tenderMoreInfoAbsPath = "$tenderMoreInfoDir/{$filename}";
                 $response = $client->request('POST', $detailsUrl, [
                     'form_params' => $formFields,
-                    'sink' => "$tenderMoreInfoDir/{$filename}"
+                    'sink' => $tenderMoreInfoAbsPath
                 ]);
 
                 $logger->addInfo("{$filename} downloaded");
-            }
-            elseif ($url->query->get('page') == 'entreprise.EntrepriseDownloadReglement') {
+
+                $pathInfo = pathinfo($tenderMoreInfoAbsPath);
+                if ($pathInfo['extension'] == 'zip') {
+                    $message = extractZip($tenderMoreInfoAbsPath, "{$tenderMoreInfoDir}/", $logger);
+                    $logger->addInfo($message);
+                }
+            } elseif ($url->query->get('page') == 'entreprise.EntrepriseDownloadReglement') {
                 $baseUrl = clone $detailsUrl;
                 $baseUrl->query->setData([]);
                 $url->join($baseUrl);
-                $logger->addInfo("{$url->query->get('page')}");
 
                 $tenderRulesDir = $tenderDir . "/tender_rules";
                 mkdir($tenderRulesDir);
@@ -162,21 +193,18 @@ foreach($tenderList as $tender){
                 }
                 $tenderRulesAbsolutePath = $tenderRulesDir . "/{$filename}";
                 $response = $client->request('GET', $url, ['sink' => $tenderRulesAbsolutePath]);
-                $pathInfo = pathinfo($tenderRulesAbsolutePath);
-                if ($pathInfo['extension'] == 'zip'){
-                    $message = extractZip($tenderRulesAbsolutePath, "{$tenderRulesDir}/");
-                    $logger->addInfo($message);
-                }
-
                 if ($response->getStatusCode() == 200) {
                     $logger->addInfo("{$filename} downloaded");
                 }
-            }
-            elseif ($url->query->get('page') == 'entreprise.EntrepriseDemandeTelechargementDce') {
+                $pathInfo = pathinfo($tenderRulesAbsolutePath);
+                if ($pathInfo['extension'] == 'zip') {
+                    $message = extractZip($tenderRulesAbsolutePath, "{$tenderRulesDir}/", $logger);
+                    $logger->addInfo($message);
+                }
+            } elseif ($url->query->get('page') == 'entreprise.EntrepriseDemandeTelechargementDce') {
                 $baseUrl = clone $detailsUrl;
                 $baseUrl->query->setData([]);
                 $url->join($baseUrl);
-                $logger->addInfo("{$url->query->get('page')}");
                 $tenderDocsDir = $tenderDir . "/tender_documents";
                 mkdir($tenderDocsDir);
                 $xpath = getXpathFromUrl($client, $url);
@@ -194,6 +222,10 @@ foreach($tenderList as $tender){
                     'form_params' => $formFields,
                     'sink' => $archiveName
                 ]);
+
+                if ($response->getStatusCode() == 200) {
+                    $logger->addInfo("Archive downloaded");
+                }
 
                 $message = extractZip($archiveName, "{$tenderDocsDir}/", $logger);
                 $logger->addInfo($message);
