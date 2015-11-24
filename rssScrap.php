@@ -9,6 +9,8 @@ use Monolog\Handler\StreamHandler;
 use Purl\Url;
 use Psr\Http\Message\ResponseInterface;
 
+date_default_timezone_set('Europe/Paris');
+
 function getXpathFromUrl($client, $url){
     $response = $client->request('GET', $url);
     $page = new DOMDocument();
