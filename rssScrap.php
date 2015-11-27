@@ -139,9 +139,18 @@ if(!file_exists($tenderRootDir)){
 
 foreach($tenderList as $tender){
     $tenderDir = $tenderRootDir . "/{$tender->guid}";
-    if (file_exists($tenderDir)) {
-        $logger->addInfo("Skipping tender {$tender->guid}, corresponding folder exists");
-        continue;
+
+    $pubDateFilePath = "{$tenderDir}/.tender_pub_date";
+    if (file_exists($tenderDir) && file_exists($pubDate)){
+        $pubDate = file_get_contents($pubDateFilePath);
+        if ($pubDate != $tender->pubDate){
+            file_put_contents($pubDateFilePath, $pubDate);
+            $logger->addInfo("Updating tender {$tender->guid}, new pubDate");
+        }
+        else{
+            $logger->addInfo("Skipping tender {$tender->guid}, already processed");
+            continue;
+        }
     }
 
     $detailsUrl = new Url($tender->link);
