@@ -76,6 +76,29 @@ function extractZip($filename, $destination, $logger){
     }
 }
 
+function ocrPdfInFolder($folderPath, $logger){
+    $directory = new \RecursiveDirectoryIterator($folderPath, \FilesystemIterator::FOLLOW_SYMLINKS);
+    $filter = new \RecursiveCallbackFilterIterator($directory, function ($current, $key, $iterator) {
+        if ($iterator->hasChildren()){
+            return true;
+        }
+        return strtolower($current->getExtension()) == 'pdf';
+    });
+
+    $iterator = new \RecursiveIteratorIterator($filter);
+    foreach ($iterator as $fileObject) {
+        $ocrFilename = "{$fileObject->getPath()}/{$fileObject->getBasename('.pdf')}.OCR.pdf";
+        $command = escapeshellcmd("ocrmypdf \"{$fileObject->getPathname()}\" \"{$ocrFilename}\"");
+        exec($command);
+        if (file_exists($ocrFilename)){
+            $logger->addInfo("OCR is done for file {$fileObject->getPathname()}. \nSee {$ocrFilename}");
+        }
+        else{
+            $logger->addInfo("File {$fileObject->getPathname()} dont need OCR");
+        }
+    }
+}
+
 //for running within Phar file
 if(!empty(Phar::running(false))){
     $pathArr = explode('/', Phar::running(false));
@@ -237,9 +260,10 @@ foreach($tenderList as $tender){
 
                 $pathInfo = pathinfo($tenderMoreInfoAbsPath);
                 if (isset($pathInfo['extension']) && $pathInfo['extension'] == 'zip') {
-                    $message = extractZip($tenderMoreInfoAbsPath, "{$tenderMoreInfoDir}/", $logger);
+                    $message = extractZip($tenderMoreInfoAbsPath, $tenderMoreInfoDir, $logger);
                     $logger->addInfo($message);
                 }
+                ocrPdfInFolder($tenderMoreInfoDir, $logger);
             }
             elseif ($url->query->get('page') == 'entreprise.EntrepriseDownloadReglement') {
                 $baseUrl = new Url($detailsUrl);
@@ -278,9 +302,10 @@ foreach($tenderList as $tender){
 
                 $pathInfo = pathinfo($tenderRulesAbsolutePath);
                 if ($pathInfo['extension'] == 'zip') {
-                    $message = extractZip($tenderRulesAbsolutePath, "{$tenderRulesDir}/", $logger);
+                    $message = extractZip($tenderRulesAbsolutePath, $tenderRulesDir, $logger);
                     $logger->addInfo($message);
                 }
+                ocrPdfInFolder($tenderRulesDir, $logger);
             }
             elseif ($url->query->get('page') == 'entreprise.EntrepriseDemandeTelechargementDce') {
                 $baseUrl = new Url($detailsUrl);
@@ -334,9 +359,10 @@ foreach($tenderList as $tender){
 
                 $pathInfo = pathinfo($archiveNameAbsPath);
                 if ($pathInfo['extension'] == 'zip') {
-                    $message = extractZip($archiveNameAbsPath, "{$tenderDocsDir}", $logger);
+                    $message = extractZip($archiveNameAbsPath, $tenderDocsDir, $logger);
                     $logger->addInfo($message);
                 }
+                ocrPdfInFolder($tenderDocsDir, $logger);
             }
         }
     }
