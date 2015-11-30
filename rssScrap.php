@@ -87,6 +87,7 @@ function ocrPdfInFolder($folderPath, $logger){
 
     $iterator = new \RecursiveIteratorIterator($filter);
     foreach ($iterator as $fileObject) {
+        chmod($fileObject->getPath(),0666);
         $ocrFilename = "{$fileObject->getPath()}/{$fileObject->getBasename('.pdf')}.OCR.pdf";
         $command = escapeshellcmd("ocrmypdf \"{$fileObject->getPathname()}\" \"{$ocrFilename}\"");
         exec($command);
