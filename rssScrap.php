@@ -87,7 +87,7 @@ function ocrPdfInFolder($folderPath, $logger){
 
     $iterator = new \RecursiveIteratorIterator($filter);
     foreach ($iterator as $fileObject) {
-        chmod($fileObject->getPath(),0666);
+        chmod($fileObject->getPathname(),0666);
         $ocrFilename = "{$fileObject->getPath()}/{$fileObject->getBasename('.pdf')}.OCR.pdf";
         $command = escapeshellcmd("ocrmypdf \"{$fileObject->getPathname()}\" \"{$ocrFilename}\"");
         exec($command);
@@ -95,7 +95,7 @@ function ocrPdfInFolder($folderPath, $logger){
             $logger->addInfo("OCR is done for file {$fileObject->getPathname()}. \nSee {$ocrFilename}");
         }
         else{
-            $logger->addInfo("File {$fileObject->getPathname()} dont need OCR");
+            $logger->addInfo("File {$fileObject->getFilename()} dont need OCR");
         }
     }
 }
@@ -113,7 +113,11 @@ else {
 // create a log channel
 $logger = new Logger('scrape-process');
 //$logger->pushHandler(new StreamHandler($currentDir.'/scrape.log', Logger::INFO));
-$logger->pushHandler(new \Monolog\Handler\ErrorLogHandler());
+$handler = new \Monolog\Handler\ErrorLogHandler();
+$logFormat = "[%datetime%] %message%";
+$formatter = new \Monolog\Formatter\LineFormatter($logFormat, null, false, true);
+$handler->setFormatter($formatter);
+$logger->pushHandler($handler);
 
 $feedFilename = $currentDir.'/tenderfeed.xml';
 
