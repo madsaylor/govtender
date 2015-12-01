@@ -88,8 +88,9 @@ function ocrPdfInFolder($folderPath, $logger){
     $iterator = new \RecursiveIteratorIterator($filter);
     foreach ($iterator as $fileObject) {
         chmod($fileObject->getPathname(),0666);
-        $ocrFilename = "{$fileObject->getPath()}/{$fileObject->getBasename('.pdf')}.OCR.pdf";
-        $command = escapeshellcmd("ocrmypdf \"{$fileObject->getPathname()}\" \"{$ocrFilename}\"");
+        $ocrFilename = escapeshellarg("{$fileObject->getPath()}/{$fileObject->getBasename('.pdf')}.OCR.pdf");
+        $filename = escapeshellarg($fileObject->getPathname());
+        $command = "ocrmypdf {$filename} {$ocrFilename}";
         exec($command);
         if (file_exists($ocrFilename)){
             $logger->addInfo("OCR is done for file {$fileObject->getPathname()}. \nSee {$ocrFilename}");
@@ -100,278 +101,276 @@ function ocrPdfInFolder($folderPath, $logger){
     }
 }
 
+function run()
+{
 //for running within Phar file
-if(!empty(Phar::running(false))){
-    $pathArr = explode('/', Phar::running(false));
-    array_pop($pathArr);
-    $currentDir = implode('/', $pathArr);
-}
-else {
-    $currentDir = __DIR__;
-}
+    if (!empty(Phar::running(false))) {
+        $pathArr = explode('/', Phar::running(false));
+        array_pop($pathArr);
+        $currentDir = implode('/', $pathArr);
+    } else {
+        $currentDir = __DIR__;
+    }
 
 // create a log channel
-$logger = new Logger('scrape-process');
-//$logger->pushHandler(new StreamHandler($currentDir.'/scrape.log', Logger::INFO));
-$handler = new \Monolog\Handler\ErrorLogHandler();
-$logFormat = "[%datetime%] %message%";
-$formatter = new \Monolog\Formatter\LineFormatter($logFormat, null, false, true);
-$handler->setFormatter($formatter);
-$logger->pushHandler($handler);
+    $logger = new Logger('scrape-process');
+    $handler = new StreamHandler($currentDir.'/govtender.log', Logger::INFO);
+    $logFormat = "[%datetime%] %message%\n";
+    $formatter = new \Monolog\Formatter\LineFormatter($logFormat, null, false, true);
+    $handler->setFormatter($formatter);
+    $logger->pushHandler($handler);
 
-$feedFilename = $currentDir.'/tenderfeed.xml';
+    $feedFilename = $currentDir . '/tenderfeed.xml';
 
-$client = new Client();
+    $client = new Client();
 
-if (!file_exists($feedFilename)){
-    $i = 0;
-    $maxRetries = 5;
-    $response = null;
-    while($i < $maxRetries){
-        try{
-            $response = $client->request('GET', 'https://www.marches-publics.gouv.fr/rssTr.xml',
-                ['sink' => $feedFilename]);
-            break;
+    if (!file_exists($feedFilename)) {
+        $i = 0;
+        $maxRetries = 5;
+        $response = null;
+        while ($i < $maxRetries) {
+            try {
+                $response = $client->request('GET', 'https://www.marches-publics.gouv.fr/rssTr.xml',
+                    ['sink' => $feedFilename]);
+                break;
+            } catch (\GuzzleHttp\Exception\RequestException $e) {
+                unlink($feedFilename);
+                $currentRetry = $i + 1;
+                $logger->addInfo("Download error: {$e->getMessage()}. {$currentRetry} retries of {$maxRetries}");
+                $i++;
+            }
         }
-        catch (\GuzzleHttp\Exception\RequestException $e){
-            unlink($feedFilename);
-            $currentRetry = $i+1;
-            $logger->addInfo("Download error: {$e->getMessage()}. {$currentRetry} retries of {$maxRetries}");
-            $i++;
-        }
-    }
 
-    if ($response && $response->getStatusCode() == 200){
-        $logger->addInfo("File {$feedFilename} is downloaded");
-    }
-    else{
-        $logger->addInfo("Feed download failed");
-        die();
-    }
-}
-else{
-    $logger->addInfo("Using existing file {$feedFilename}");
-}
-
-$xml = new SimpleXMLElement(file_get_contents($feedFilename));
-$tenderList = $xml->xpath('//channel/item');
-$pubDateElements = $xml->xpath('//channel/pubDate');
-$pubDate = new DateTime($pubDateElements[0]->__toString());
-
-$logger->addInfo("File published at {$pubDate->format('Y-m-d H:i:s')} and contains ".
-    count($tenderList)." tenders");
-
-$loginUrl = 'https://www.marches-publics.gouv.fr/index.php?page=entreprise.EntrepriseHome&goto=&lang=en';
-
-$client = new Client(['cookies' => true]);
-
-$xpath = getXpathFromUrl($client, $loginUrl);
-
-$formFields = getFormFields($xpath, 'ctl0_ctl1');
-
-$formFields['PRADO_POSTBACK_TARGET'] = 'ctl0$CONTENU_PAGE$authentificationButton';
-$formFields['ctl0$CONTENU_PAGE$login'] = 'lebowski';
-$formFields['ctl0$CONTENU_PAGE$password'] = 'PLvjWnSUl5';
-$formFields['ctl0$CONTENU_PAGE$authentificationButton_x'] = 14;
-$formFields['ctl0$CONTENU_PAGE$authentificationButton_y'] = 0;
-
-$response = $client->request('POST', $loginUrl, ['form_params' => $formFields]);
-$tenderRootDir = $currentDir.'/tenders';
-if(!file_exists($tenderRootDir)){
-    mkdir($tenderRootDir);
-}
-
-foreach($tenderList as $tender){
-    $tenderDir = $tenderRootDir . "/{$tender->guid}";
-    $pubDateFilePath = "{$tenderDir}/.tender_pub_date";
-    if (file_exists($tenderDir) && file_exists($pubDateFilePath)) {
-        $pubDate = file_get_contents($pubDateFilePath);
-        if ($pubDate != $tender->pubDate) {
-            file_put_contents($pubDateFilePath, $tender->pubDate);
-            $logger->addInfo("Updating tender {$tender->guid}, new pubDate");
+        if ($response && $response->getStatusCode() == 200) {
+            $logger->addInfo("File {$feedFilename} is downloaded");
         } else {
-            $logger->addInfo("Skipping tender {$tender->guid}, already processed");
-            continue;
+            $logger->addInfo("Feed download failed");
+            die();
         }
     } else {
-        mkdir($tenderDir);
-        file_put_contents($pubDateFilePath, $tender->pubDate);
+        $logger->addInfo("Using existing file {$feedFilename}");
     }
 
-    $detailsUrl = new Url($tender->link);
-    $detailsUrl->query->set('page', 'entreprise.EntrepriseDetailsConsultation');
-    $detailsUrl->query->remove('AllCons');
+    $xml = new SimpleXMLElement(file_get_contents($feedFilename));
+    $tenderList = $xml->xpath('//channel/item');
+    $pubDateElements = $xml->xpath('//channel/pubDate');
+    $pubDate = new DateTime($pubDateElements[0]->__toString());
 
-    $detailsXpath = getXpathFromUrl($client, $detailsUrl);
-    $xpathQuery = '//li[not(contains(@style,"display:none"))]//a[contains(@id,"ctl0_CONTENU_PAGE_linkDownload")]';
-    $result = $detailsXpath->query($xpathQuery);
-    $logger->addInfo("Tender url {$tender->link}");
+    $logger->addInfo("File published at {$pubDate->format('Y-m-d H:i:s')} and contains " .
+        count($tenderList) . " tenders");
 
-    $tenderDir = $tenderRootDir . "/{$tender->guid}";
-    if ($result->length > 0) {
-        $logger->addInfo("{$result->length} files found on tender {$tender->guid}");
-        foreach ($result as $aElement) {
-            if (strpos($aElement->getAttribute('href'), 'javascript:') !== false){
-                $url = false;
+    $loginUrl = 'https://www.marches-publics.gouv.fr/index.php?page=entreprise.EntrepriseHome&goto=&lang=en';
+
+    $client = new Client(['cookies' => true]);
+
+    $xpath = getXpathFromUrl($client, $loginUrl);
+
+    $formFields = getFormFields($xpath, 'ctl0_ctl1');
+
+    $formFields['PRADO_POSTBACK_TARGET'] = 'ctl0$CONTENU_PAGE$authentificationButton';
+    $formFields['ctl0$CONTENU_PAGE$login'] = 'lebowski';
+    $formFields['ctl0$CONTENU_PAGE$password'] = 'PLvjWnSUl5';
+    $formFields['ctl0$CONTENU_PAGE$authentificationButton_x'] = 14;
+    $formFields['ctl0$CONTENU_PAGE$authentificationButton_y'] = 0;
+
+    $response = $client->request('POST', $loginUrl, ['form_params' => $formFields]);
+    $tenderRootDir = $currentDir . '/tenders';
+    if (!file_exists($tenderRootDir)) {
+        mkdir($tenderRootDir);
+    }
+
+    foreach ($tenderList as $tender) {
+        $tenderDir = $tenderRootDir . "/{$tender->guid}";
+        $pubDateFilePath = "{$tenderDir}/.tender_pub_date";
+        if (file_exists($tenderDir) && file_exists($pubDateFilePath)) {
+            $pubDate = file_get_contents($pubDateFilePath);
+            if ($pubDate != $tender->pubDate) {
+                file_put_contents($pubDateFilePath, $tender->pubDate);
+                $logger->addInfo("Updating tender {$tender->guid}, new pubDate");
+            } else {
+                $logger->addInfo("Skipping tender {$tender->guid}, already processed");
+                continue;
             }
-            else{
-                $url = new Url($aElement->getAttribute('href'));
-            }
+        } else {
+            mkdir($tenderDir);
+            file_put_contents($pubDateFilePath, $tender->pubDate);
+        }
 
-            if (!$url) {
-                $formFields = getFormFields($detailsXpath, 'ctl0_ctl1');
-                $formFields['PRADO_POSTBACK_TARGET'] = 'ctl0$CONTENU_PAGE$linkDownloadComplement';
-                $formFields['ongletActive'] = '1';
+        $detailsUrl = new Url($tender->link);
+        $detailsUrl->query->set('page', 'entreprise.EntrepriseDetailsConsultation');
+        $detailsUrl->query->remove('AllCons');
 
-                foreach ($formFields as $key => $value) {
-                    if (!in_array($key, ['PRADO_PAGESTATE', 'PRADO_POSTBACK_TARGET'])) {
-                        unset($formFields[$key]);
-                    }
-                }
+        $detailsXpath = getXpathFromUrl($client, $detailsUrl);
+        $xpathQuery = '//li[not(contains(@style,"display:none"))]//a[contains(@id,"ctl0_CONTENU_PAGE_linkDownload")]';
+        $result = $detailsXpath->query($xpathQuery);
+        $logger->addInfo("Tender url {$tender->link}");
 
-                $tenderMoreInfoDir = $tenderDir . "/tender_more_info";
-                mkdir($tenderMoreInfoDir);
-
-                $filename = 'file.extension';
-                $tenderMoreInfoAbsPath = "$tenderMoreInfoDir/$filename";
-
-                $i = 0;
-                $maxRetries = 5;
-                $response = null;
-                while ($i < $maxRetries) {
-                    try {
-                        $response = $client->request('POST', $detailsUrl, [
-                            'form_params' => $formFields,
-                            'sink' => $tenderMoreInfoAbsPath
-                        ]);
-                        $filename = getFilenameFromResponse($response);
-                        $path = "{$tenderMoreInfoDir}/{$filename}";
-                        rename($tenderMoreInfoAbsPath, $path);
-                        $tenderMoreInfoAbsPath = $path;
-                        break;
-                    } catch (\GuzzleHttp\Exception\RequestException $e) {
-                        unlink($tenderMoreInfoAbsPath);
-                        $currentRetry = $i + 1;
-                        $logger->addInfo("Download error: {$e->getMessage()}. {$currentRetry} retries of {$maxRetries}");
-                        $i++;
-                    }
-                }
-
-                if ($response && $response->getStatusCode() == 200) {
-                    $logger->addInfo("{$filename} downloaded");
+        $tenderDir = $tenderRootDir . "/{$tender->guid}";
+        if ($result->length > 0) {
+            $logger->addInfo("{$result->length} files found on tender {$tender->guid}");
+            foreach ($result as $aElement) {
+                if (strpos($aElement->getAttribute('href'), 'javascript:') !== false) {
+                    $url = false;
                 } else {
-                    $logger->addInfo("Download of {$filename} failed");
+                    $url = new Url($aElement->getAttribute('href'));
                 }
 
-                $pathInfo = pathinfo($tenderMoreInfoAbsPath);
-                if (isset($pathInfo['extension']) && $pathInfo['extension'] == 'zip') {
-                    $message = extractZip($tenderMoreInfoAbsPath, $tenderMoreInfoDir, $logger);
-                    $logger->addInfo($message);
-                }
-                ocrPdfInFolder($tenderMoreInfoDir, $logger);
-            }
-            elseif ($url->query->get('page') == 'entreprise.EntrepriseDownloadReglement') {
-                $baseUrl = new Url($detailsUrl);
-                $baseUrl->query->setData([]);
-                $url->join($baseUrl);
+                if (!$url) {
+                    $formFields = getFormFields($detailsXpath, 'ctl0_ctl1');
+                    $formFields['PRADO_POSTBACK_TARGET'] = 'ctl0$CONTENU_PAGE$linkDownloadComplement';
+                    $formFields['ongletActive'] = '1';
 
-                $tenderRulesDir = $tenderDir . "/tender_rules";
-                mkdir($tenderRulesDir);
-
-                //getting filename with preliminary HEAD request
-                $response = $client->head($url);
-                $filename = getFilenameFromResponse($response) ? getFilenameFromResponse($response) : 'tenderRules.file';
-
-                $tenderRulesAbsolutePath = $tenderRulesDir . "/{$filename}";
-
-                $i = 0;
-                $maxRetries = 5;
-                $response = null;
-                while ($i < $maxRetries) {
-                    try {
-                        $response = $client->request('GET', $url, ['sink' => $tenderRulesAbsolutePath]);
-                        break;
-                    } catch (\GuzzleHttp\Exception\RequestException $e) {
-                        unlink($tenderRulesAbsolutePath);
-                        $currentRetry = $i + 1;
-                        $logger->addInfo("Download error: {$e->getMessage()}. {$currentRetry} retries of {$maxRetries}");
-                        $i++;
+                    foreach ($formFields as $key => $value) {
+                        if (!in_array($key, ['PRADO_PAGESTATE', 'PRADO_POSTBACK_TARGET'])) {
+                            unset($formFields[$key]);
+                        }
                     }
-                }
 
-                if ($response && $response->getStatusCode() == 200) {
-                    $logger->addInfo("{$filename} downloaded");
-                } else {
-                    $logger->addInfo("Download of {$filename} failed");
-                }
+                    $tenderMoreInfoDir = $tenderDir . "/tender_more_info";
+                    mkdir($tenderMoreInfoDir);
 
-                $pathInfo = pathinfo($tenderRulesAbsolutePath);
-                if ($pathInfo['extension'] == 'zip') {
-                    $message = extractZip($tenderRulesAbsolutePath, $tenderRulesDir, $logger);
-                    $logger->addInfo($message);
-                }
-                ocrPdfInFolder($tenderRulesDir, $logger);
-            }
-            elseif ($url->query->get('page') == 'entreprise.EntrepriseDemandeTelechargementDce') {
-                $baseUrl = new Url($detailsUrl);
-                $baseUrl->query->setData([]);
-                $url->join($baseUrl);
+                    $filename = 'file.extension';
+                    $tenderMoreInfoAbsPath = "$tenderMoreInfoDir/$filename";
 
-                $tenderDocsDir = $tenderDir . "/tender_documents";
-                mkdir($tenderDocsDir);
-
-                $xpath = getXpathFromUrl($client, $url);
-                $formFields = getFormFields($xpath, 'ctl0_ctl1');
-                $formFields['ctl0$CONTENU_PAGE$EntrepriseFormulaireDemande$accepterConditions'] = 'on';
-                $formFields['ctl0$CONTENU_PAGE$EntrepriseFormulaireDemande$RadioGroup'] = 'ctl0$CONTENU_PAGE$EntrepriseFormulaireDemande$choixTelechargement';
-                $formFields['PRADO_POSTBACK_TARGET'] = 'ctl0$CONTENU_PAGE$validateButton';
-                $response = $client->request('POST', $url, ['form_params' => $formFields]);
-
-                $xpath = getXpathFromHtmlBody($response->getBody());
-                $formFields = getFormFields($xpath, 'ctl0_ctl1');
-                $formFields['PRADO_POSTBACK_TARGET'] = 'ctl0$CONTENU_PAGE$EntrepriseDownloadDce$completeDownload';
-
-                $archiveNameAbsPath = "{$tenderDocsDir}/docs.zip";
-
-                $i = 0;
-                $maxRetries = 5;
-                $response = null;
-                while ($i < $maxRetries) {
-                    try {
-                        $response = $client->request('POST', $url, [
-                            'form_params' => $formFields,
-                            'sink' => $archiveNameAbsPath
-                        ]);
-                        $filename = getFilenameFromResponse($response);
-                        $path = "{$tenderDocsDir}/{$filename}";
-                        rename($archiveNameAbsPath, $path);
-                        $archiveNameAbsPath = $path;
-                        break;
-                    } catch (\GuzzleHttp\Exception\RequestException $e) {
-                        unlink($archiveNameAbsPath);
-                        $currentRetry = $i + 1;
-                        $logger->addInfo("Download error: {$e->getMessage()}. {$currentRetry} retries of {$maxRetries}");
-                        $i++;
+                    $i = 0;
+                    $maxRetries = 5;
+                    $response = null;
+                    while ($i < $maxRetries) {
+                        try {
+                            $response = $client->request('POST', $detailsUrl, [
+                                'form_params' => $formFields,
+                                'sink' => $tenderMoreInfoAbsPath
+                            ]);
+                            $filename = getFilenameFromResponse($response);
+                            $path = "{$tenderMoreInfoDir}/{$filename}";
+                            rename($tenderMoreInfoAbsPath, $path);
+                            $tenderMoreInfoAbsPath = $path;
+                            break;
+                        } catch (\GuzzleHttp\Exception\RequestException $e) {
+                            unlink($tenderMoreInfoAbsPath);
+                            $currentRetry = $i + 1;
+                            $logger->addInfo("Download error: {$e->getMessage()}. {$currentRetry} retries of {$maxRetries}");
+                            $i++;
+                        }
                     }
-                }
 
-                if ($response && $response->getStatusCode() == 200) {
-                    $logger->addInfo("{$filename} downloaded");
-                }
-                else {
-                    $logger->addInfo("Download of {$filename} failed");
-                }
+                    if ($response && $response->getStatusCode() == 200) {
+                        $logger->addInfo("{$filename} downloaded");
+                    } else {
+                        $logger->addInfo("Download of {$filename} failed");
+                    }
 
-                $pathInfo = pathinfo($archiveNameAbsPath);
-                if ($pathInfo['extension'] == 'zip') {
-                    $message = extractZip($archiveNameAbsPath, $tenderDocsDir, $logger);
-                    $logger->addInfo($message);
+                    $pathInfo = pathinfo($tenderMoreInfoAbsPath);
+                    if (isset($pathInfo['extension']) && $pathInfo['extension'] == 'zip') {
+                        $message = extractZip($tenderMoreInfoAbsPath, $tenderMoreInfoDir, $logger);
+                        $logger->addInfo($message);
+                    }
+                    ocrPdfInFolder($tenderMoreInfoDir, $logger);
+                } elseif ($url->query->get('page') == 'entreprise.EntrepriseDownloadReglement') {
+                    $baseUrl = new Url($detailsUrl);
+                    $baseUrl->query->setData([]);
+                    $url->join($baseUrl);
+
+                    $tenderRulesDir = $tenderDir . "/tender_rules";
+                    mkdir($tenderRulesDir);
+
+                    //getting filename with preliminary HEAD request
+                    $response = $client->head($url);
+                    $filename = getFilenameFromResponse($response) ? getFilenameFromResponse($response) : 'tenderRules.file';
+
+                    $tenderRulesAbsolutePath = $tenderRulesDir . "/{$filename}";
+
+                    $i = 0;
+                    $maxRetries = 5;
+                    $response = null;
+                    while ($i < $maxRetries) {
+                        try {
+                            $response = $client->request('GET', $url, ['sink' => $tenderRulesAbsolutePath]);
+                            break;
+                        } catch (\GuzzleHttp\Exception\RequestException $e) {
+                            unlink($tenderRulesAbsolutePath);
+                            $currentRetry = $i + 1;
+                            $logger->addInfo("Download error: {$e->getMessage()}. {$currentRetry} retries of {$maxRetries}");
+                            $i++;
+                        }
+                    }
+
+                    if ($response && $response->getStatusCode() == 200) {
+                        $logger->addInfo("{$filename} downloaded");
+                    } else {
+                        $logger->addInfo("Download of {$filename} failed");
+                    }
+
+                    $pathInfo = pathinfo($tenderRulesAbsolutePath);
+                    if ($pathInfo['extension'] == 'zip') {
+                        $message = extractZip($tenderRulesAbsolutePath, $tenderRulesDir, $logger);
+                        $logger->addInfo($message);
+                    }
+                    ocrPdfInFolder($tenderRulesDir, $logger);
+                } elseif ($url->query->get('page') == 'entreprise.EntrepriseDemandeTelechargementDce') {
+                    $baseUrl = new Url($detailsUrl);
+                    $baseUrl->query->setData([]);
+                    $url->join($baseUrl);
+
+                    $tenderDocsDir = $tenderDir . "/tender_documents";
+                    mkdir($tenderDocsDir);
+
+                    $xpath = getXpathFromUrl($client, $url);
+                    $formFields = getFormFields($xpath, 'ctl0_ctl1');
+                    $formFields['ctl0$CONTENU_PAGE$EntrepriseFormulaireDemande$accepterConditions'] = 'on';
+                    $formFields['ctl0$CONTENU_PAGE$EntrepriseFormulaireDemande$RadioGroup'] = 'ctl0$CONTENU_PAGE$EntrepriseFormulaireDemande$choixTelechargement';
+                    $formFields['PRADO_POSTBACK_TARGET'] = 'ctl0$CONTENU_PAGE$validateButton';
+                    $response = $client->request('POST', $url, ['form_params' => $formFields]);
+
+                    $xpath = getXpathFromHtmlBody($response->getBody());
+                    $formFields = getFormFields($xpath, 'ctl0_ctl1');
+                    $formFields['PRADO_POSTBACK_TARGET'] = 'ctl0$CONTENU_PAGE$EntrepriseDownloadDce$completeDownload';
+
+                    $archiveNameAbsPath = "{$tenderDocsDir}/docs.zip";
+
+                    $i = 0;
+                    $maxRetries = 5;
+                    $response = null;
+                    while ($i < $maxRetries) {
+                        try {
+                            $response = $client->request('POST', $url, [
+                                'form_params' => $formFields,
+                                'sink' => $archiveNameAbsPath
+                            ]);
+                            $filename = getFilenameFromResponse($response);
+                            $path = "{$tenderDocsDir}/{$filename}";
+                            rename($archiveNameAbsPath, $path);
+                            $archiveNameAbsPath = $path;
+                            break;
+                        } catch (\GuzzleHttp\Exception\RequestException $e) {
+                            unlink($archiveNameAbsPath);
+                            $currentRetry = $i + 1;
+                            $logger->addInfo("Download error: {$e->getMessage()}. {$currentRetry} retries of {$maxRetries}");
+                            $i++;
+                        }
+                    }
+
+                    if ($response && $response->getStatusCode() == 200) {
+                        $logger->addInfo("{$filename} downloaded");
+                    } else {
+                        $logger->addInfo("Download of {$filename} failed");
+                    }
+
+                    $pathInfo = pathinfo($archiveNameAbsPath);
+                    if ($pathInfo['extension'] == 'zip') {
+                        $message = extractZip($archiveNameAbsPath, $tenderDocsDir, $logger);
+                        $logger->addInfo($message);
+                    }
+                    ocrPdfInFolder($tenderDocsDir, $logger);
                 }
-                ocrPdfInFolder($tenderDocsDir, $logger);
             }
+        } else {
+            $logger->addInfo("No files on tender {$tender->guid}");
         }
     }
-    else {
-        $logger->addInfo("No files on tender {$tender->guid}");
-    }
+}
+
+while (true){
+    run();
+    sleep(60*15);
 }
