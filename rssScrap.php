@@ -7,7 +7,6 @@ use GuzzleHttp\Cookie;
 use Monolog\Logger;
 use Monolog\Handler\StreamHandler;
 use Purl\Url;
-use Psr\Http\Message\RequestInterface;
 
 date_default_timezone_set('Europe/Paris');
 
@@ -124,32 +123,32 @@ function run()
 
     $client = new Client();
 
-    if (!file_exists($feedFilename)) {
-        $i = 0;
-        $maxRetries = 5;
-        $response = null;
-        while ($i < $maxRetries) {
-            try {
-                $response = $client->request('GET', 'https://www.marches-publics.gouv.fr/rssTr.xml',
-                    ['sink' => $feedFilename]);
-                break;
-            } catch (\GuzzleHttp\Exception\RequestException $e) {
-                unlink($feedFilename);
-                $currentRetry = $i + 1;
-                $logger->addInfo("Download error: {$e->getMessage()}. {$currentRetry} retries of {$maxRetries}");
-                $i++;
-            }
+//    if (!file_exists($feedFilename)) {
+    $i = 0;
+    $maxRetries = 5;
+    $response = null;
+    while ($i < $maxRetries) {
+        try {
+            $response = $client->request('GET', 'https://www.marches-publics.gouv.fr/rssTr.xml',
+                ['sink' => $feedFilename]);
+            break;
+        } catch (\GuzzleHttp\Exception\RequestException $e) {
+            unlink($feedFilename);
+            $currentRetry = $i + 1;
+            $logger->addInfo("Download error: {$e->getMessage()}. {$currentRetry} retries of {$maxRetries}");
+            $i++;
         }
-
-        if ($response && $response->getStatusCode() == 200) {
-            $logger->addInfo("File {$feedFilename} is downloaded");
-        } else {
-            $logger->addInfo("Feed download failed");
-            die();
-        }
-    } else {
-        $logger->addInfo("Using existing file {$feedFilename}");
     }
+
+    if ($response && $response->getStatusCode() == 200) {
+        $logger->addInfo("File {$feedFilename} is downloaded");
+    } else {
+        $logger->addInfo("Feed download failed");
+        die();
+    }
+//    } else {
+//        $logger->addInfo("Using existing file {$feedFilename}");
+//    }
 
     $xml = new SimpleXMLElement(file_get_contents($feedFilename));
     $tenderList = $xml->xpath('//channel/item');
