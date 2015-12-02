@@ -91,8 +91,7 @@ function ocrPdfInFolder($folderPath, $logger){
         $ocrFilename = "{$fileObject->getPath()}/{$fileObject->getBasename('.pdf')}.OCR.pdf";
         $escapedOcrFilename = escapeshellarg($ocrFilename);
         $filename = escapeshellarg($fileObject->getPathname());
-        $command = "ocrmypdf -v 9 {$filename} {$escapedOcrFilename}";
-        $logger->addInfo($command);
+        $command = "ocrmypdf {$filename} {$escapedOcrFilename}";
         exec($command);
         if (file_exists($ocrFilename)){
             $logger->addInfo("OCR is done for file {$fileObject->getPathname()}. \nSee {$ocrFilename}");
