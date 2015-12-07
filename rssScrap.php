@@ -68,7 +68,7 @@ function extractZip($filename, $destination, $logger){
             extractZip($fileObject->getPathname(), $fileObject->getPath(), $logger);
         }
 
-        $logger->addInfo("{$filesNumber} files from {$filename} extracted");
+        $logger->addInfo("Memory usage ".number_format(memory_get_usage(true))." "."{$filesNumber} files from {$filename} extracted");
         return "Recurcive zip extraction complete";
     }
     else {
@@ -94,10 +94,10 @@ function ocrPdfInFolder($folderPath, $logger){
         $command = "ocrmypdf {$filename} {$escapedOcrFilename}";
         exec($command);
         if (file_exists($ocrFilename)){
-            $logger->addInfo("OCR is done for file {$fileObject->getPathname()}. \nSee {$ocrFilename}");
+            $logger->addInfo("Memory usage ".number_format(memory_get_usage(true))." "."OCR is done for file {$fileObject->getPathname()}. \nSee {$ocrFilename}");
         }
         else{
-            $logger->addInfo("File {$fileObject->getFilename()} dont need OCR");
+            $logger->addInfo("Memory usage ".number_format(memory_get_usage(true))." "."File {$fileObject->getFilename()} dont need OCR");
         }
     }
 }
@@ -120,6 +120,9 @@ function run()
     $formatter = new \Monolog\Formatter\LineFormatter($logFormat, null, false, true);
     $handler->setFormatter($formatter);
     $logger->pushHandler($handler);
+//    $memusage = function(){        
+//        return number_format(memory_get_usage(true));
+//    };
 
     $feedFilename = $currentDir . '/tenderfeed.xml';
 
@@ -137,19 +140,19 @@ function run()
         } catch (\GuzzleHttp\Exception\RequestException $e) {
             unlink($feedFilename);
             $currentRetry = $i + 1;
-            $logger->addInfo("Download error: {$e->getMessage()}. {$currentRetry} retries of {$maxRetries}");
+            $logger->addInfo("Memory usage ".number_format(memory_get_usage(true))." "."Download error: {$e->getMessage()}. {$currentRetry} retries of {$maxRetries}");
             $i++;
         }
     }
 
     if ($response && $response->getStatusCode() == 200) {
-        $logger->addInfo("File {$feedFilename} is downloaded");
+        $logger->addInfo("Memory usage ".number_format(memory_get_usage(true))." "."File {$feedFilename} is downloaded");
     } else {
-        $logger->addInfo("Feed download failed");
+        $logger->addInfo("Memory usage ".number_format(memory_get_usage(true))." "."Feed download failed");
         die();
     }
 //    } else {
-//        $logger->addInfo("Using existing file {$feedFilename}");
+//        $logger->addInfo("Memory usage ".number_format(memory_get_usage(true))." "."Using existing file {$feedFilename}");
 //    }
 
     $xml = new SimpleXMLElement(file_get_contents($feedFilename));
@@ -157,7 +160,7 @@ function run()
     $pubDateElements = $xml->xpath('//channel/pubDate');
     $pubDate = new DateTime($pubDateElements[0]->__toString());
 
-    $logger->addInfo("File published at {$pubDate->format('Y-m-d H:i:s')} and contains " .
+    $logger->addInfo("Memory usage ".number_format(memory_get_usage(true))." "."File published at {$pubDate->format('Y-m-d H:i:s')} and contains " .
         count($tenderList) . " tenders");
 
     $loginUrl = 'https://www.marches-publics.gouv.fr/index.php?page=entreprise.EntrepriseHome&goto=&lang=en';
@@ -187,9 +190,9 @@ function run()
             $pubDate = file_get_contents($pubDateFilePath);
             if ($pubDate != $tender->pubDate) {
                 file_put_contents($pubDateFilePath, $tender->pubDate);
-                $logger->addInfo("Updating tender {$tender->guid}, new pubDate");
+                $logger->addInfo("Memory usage ".number_format(memory_get_usage(true))." "."Updating tender {$tender->guid}, new pubDate");
             } else {
-                $logger->addInfo("Skipping tender {$tender->guid}, already processed");
+                $logger->addInfo("Memory usage ".number_format(memory_get_usage(true))." "."Skipping tender {$tender->guid}, already processed");
                 continue;
             }
         } else {
@@ -204,11 +207,11 @@ function run()
         $detailsXpath = getXpathFromUrl($client, $detailsUrl);
         $xpathQuery = '//li[not(contains(@style,"display:none"))]//a[contains(@id,"ctl0_CONTENU_PAGE_linkDownload")]';
         $result = $detailsXpath->query($xpathQuery);
-        $logger->addInfo("Tender url {$tender->link}");
+        $logger->addInfo("Memory usage ".number_format(memory_get_usage(true))." "."Tender url {$tender->link}");
 
         $tenderDir = $tenderRootDir . "/{$tender->guid}";
         if ($result->length > 0) {
-            $logger->addInfo("{$result->length} files found on tender {$tender->guid}");
+            $logger->addInfo("Memory usage ".number_format(memory_get_usage(true))." "."{$result->length} files found on tender {$tender->guid}");
             foreach ($result as $aElement) {
                 if (strpos($aElement->getAttribute('href'), 'javascript:') !== false) {
                     $url = false;
@@ -250,23 +253,23 @@ function run()
                         } catch (\GuzzleHttp\Exception\RequestException $e) {
                             unlink($tenderMoreInfoAbsPath);
                             $currentRetry = $i + 1;
-                            $logger->addInfo("Download error: {$e->getMessage()}. {$currentRetry} retries of {$maxRetries}");
+                            $logger->addInfo("Memory usage ".number_format(memory_get_usage(true))." "."Download error: {$e->getMessage()}. {$currentRetry} retries of {$maxRetries}");
                             $i++;
                         }
                     }
 
                     if ($response && $response->getStatusCode() == 200) {
-                        $logger->addInfo("{$filename} downloaded");
+                        $logger->addInfo("Memory usage ".number_format(memory_get_usage(true))." "."{$filename} downloaded");
                     } else {
-                        $logger->addInfo("Download of {$filename} failed");
+                        $logger->addInfo("Memory usage ".number_format(memory_get_usage(true))." "."Download of {$filename} failed");
                     }
 
                     $pathInfo = pathinfo($tenderMoreInfoAbsPath);
                     if (isset($pathInfo['extension']) && $pathInfo['extension'] == 'zip') {
                         $message = extractZip($tenderMoreInfoAbsPath, $tenderMoreInfoDir, $logger);
-                        $logger->addInfo($message);
+                        $logger->addInfo("Memory usage ".number_format(memory_get_usage(true))." ".$message);
                     }
-                    ocrPdfInFolder($tenderMoreInfoDir, $logger);
+//                    ocrPdfInFolder($tenderMoreInfoDir, $logger);
                 } elseif ($url->query->get('page') == 'entreprise.EntrepriseDownloadReglement') {
                     $baseUrl = new Url($detailsUrl);
                     $baseUrl->query->setData([]);
@@ -291,23 +294,23 @@ function run()
                         } catch (\GuzzleHttp\Exception\RequestException $e) {
                             unlink($tenderRulesAbsolutePath);
                             $currentRetry = $i + 1;
-                            $logger->addInfo("Download error: {$e->getMessage()}. {$currentRetry} retries of {$maxRetries}");
+                            $logger->addInfo("Memory usage ".number_format(memory_get_usage(true))." "."Download error: {$e->getMessage()}. {$currentRetry} retries of {$maxRetries}");
                             $i++;
                         }
                     }
 
                     if ($response && $response->getStatusCode() == 200) {
-                        $logger->addInfo("{$filename} downloaded");
+                        $logger->addInfo("Memory usage ".number_format(memory_get_usage(true))." "."{$filename} downloaded");
                     } else {
-                        $logger->addInfo("Download of {$filename} failed");
+                        $logger->addInfo("Memory usage ".number_format(memory_get_usage(true))." "."Download of {$filename} failed");
                     }
 
                     $pathInfo = pathinfo($tenderRulesAbsolutePath);
                     if ($pathInfo['extension'] == 'zip') {
                         $message = extractZip($tenderRulesAbsolutePath, $tenderRulesDir, $logger);
-                        $logger->addInfo($message);
+                        $logger->addInfo("Memory usage ".number_format(memory_get_usage(true))." ".$message);
                     }
-                    ocrPdfInFolder($tenderRulesDir, $logger);
+//                    ocrPdfInFolder($tenderRulesDir, $logger);
                 } elseif ($url->query->get('page') == 'entreprise.EntrepriseDemandeTelechargementDce') {
                     $baseUrl = new Url($detailsUrl);
                     $baseUrl->query->setData([]);
@@ -346,27 +349,27 @@ function run()
                         } catch (\GuzzleHttp\Exception\RequestException $e) {
                             unlink($archiveNameAbsPath);
                             $currentRetry = $i + 1;
-                            $logger->addInfo("Download error: {$e->getMessage()}. {$currentRetry} retries of {$maxRetries}");
+                            $logger->addInfo("Memory usage ".number_format(memory_get_usage(true))." "."Download error: {$e->getMessage()}. {$currentRetry} retries of {$maxRetries}");
                             $i++;
                         }
                     }
 
                     if ($response && $response->getStatusCode() == 200) {
-                        $logger->addInfo("{$filename} downloaded");
+                        $logger->addInfo("Memory usage ".number_format(memory_get_usage(true))." "."{$filename} downloaded");
                     } else {
-                        $logger->addInfo("Download of {$filename} failed");
+                        $logger->addInfo("Memory usage ".number_format(memory_get_usage(true))." "."Download of {$filename} failed");
                     }
 
                     $pathInfo = pathinfo($archiveNameAbsPath);
                     if ($pathInfo['extension'] == 'zip') {
                         $message = extractZip($archiveNameAbsPath, $tenderDocsDir, $logger);
-                        $logger->addInfo($message);
+                        $logger->addInfo("Memory usage ".number_format(memory_get_usage(true))." ".$message);
                     }
-                    ocrPdfInFolder($tenderDocsDir, $logger);
+//                    ocrPdfInFolder($tenderDocsDir, $logger);
                 }
             }
         } else {
-            $logger->addInfo("No files on tender {$tender->guid}");
+            $logger->addInfo("Memory usage ".number_format(memory_get_usage(true))." "."No files on tender {$tender->guid}");
         }
     }
 }
