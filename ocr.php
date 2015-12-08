@@ -52,8 +52,8 @@ function ocrPdfInFolder($folderPath, $logger){
 }
 
 $logger = new Logger('scrape-process');
-//$handler = new StreamHandler(__DIR__.'/ocr.log', Logger::INFO);
-$handler = new \Monolog\Handler\ErrorLogHandler();
+$handler = new StreamHandler(__DIR__.'/ocr.log', Logger::INFO);
+//$handler = new \Monolog\Handler\ErrorLogHandler();
 $logFormat = "[%datetime%] %message%\n";
 $formatter = new \Monolog\Formatter\LineFormatter($logFormat, null, false, true);
 $handler->setFormatter($formatter);
